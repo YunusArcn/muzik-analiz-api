@@ -5,6 +5,8 @@ import librosa
 import numpy as np
 import os
 import ssl
+import random
+import time
 
 # SSL Sertifika hatasını önlemek için
 try:
@@ -15,7 +17,6 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 
 app = Flask(__name__)
-# WordPress sitenin adresi (Güvenlik için * yerine kendi site adresini yazabilirsin)
 CORS(app)
 
 # --- MÜZİK TEORİSİ (Akor Bulucu) ---
@@ -55,15 +56,20 @@ def analiz_et():
     if not youtube_url:
         return jsonify({"success": False, "error": "URL yok"}), 400
 
-    filename = f"temp_{np.random.randint(1000,9999)}"
+    filename = f"temp_{int(time.time())}_{random.randint(1000,9999)}"
     
     try:
-        # 1. YouTube İndir (Sadece ses, en düşük boyut)
+        # --- KRİTİK GÜNCELLEME: ANDROID MASKESİ ---
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': filename,
             'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '128'}],
-            'noplaylist': True
+            'noplaylist': True,
+            # YouTube'a "Ben Android telefonum" diyoruz:
+            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+            # User Agent hilesi:
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'nocheckcertificate': True,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -71,8 +77,8 @@ def analiz_et():
             
         file_path = f"{filename}.mp3"
 
-        # 2. Analiz (Sadece ilk 90 saniye - Hız için)
-        y, sr = librosa.load(file_path, duration=90)
+        # 2. Analiz (Sadece ilk 60 saniye - Hız için)
+        y, sr = librosa.load(file_path, duration=60)
         
         # BPM
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
@@ -83,7 +89,7 @@ def analiz_et():
         notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
         detected_key = notes[key_idx]
 
-        # AKORLAR (Saniyede bir örnek al)
+        # AKORLAR
         akorlar = []
         hop_length = 512
         chroma_cens = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=hop_length)
@@ -108,6 +114,10 @@ def analiz_et():
         })
 
     except Exception as e:
+        # Hata durumunda bile dosyayı temizle
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
+        # Hata mesajını detaylı göster
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
