@@ -7,8 +7,9 @@ import os
 import ssl
 import random
 import time
+import sys
 
-# SSL Hatasını Önleme (Sunucular için kritik)
+# SSL Hatasını Önleme
 try:
     _create_unverified_https_context = ssl._create_unverified_context
 except AttributeError:
@@ -16,12 +17,14 @@ except AttributeError:
 else:
     ssl._create_default_https_context = _create_unverified_https_context
 
+# Sürüm kontrolü (Loglarda görmek için)
+print(f"yt-dlp sürümü: {yt_dlp.version.__version__}")
+
 app = Flask(__name__)
 CORS(app)
 
 # --- MÜZİK TEORİSİ FONKSİYONLARI ---
 def get_chord_from_chroma(chroma, time_idx):
-    # Basit Akor Şablonları
     templates = {
         'C': [1,0,0,0,1,0,0,1,0,0,0,0], 'Cm': [1,0,0,1,0,0,0,1,0,0,0,0],
         'C#': [0,1,0,0,0,1,0,0,1,0,0,0], 'C#m': [0,1,0,0,1,0,0,0,1,0,0,0],
@@ -56,27 +59,28 @@ def analiz_et():
     if not youtube_url:
         return jsonify({"success": False, "error": "Lütfen bir YouTube linki gönderin."}), 400
 
-    # Benzersiz dosya adı oluştur
     filename = f"temp_{int(time.time())}_{random.randint(1000,9999)}"
     
     try:
-        # --- KRİTİK AYARLAR: YouTube Bot Korumasını Aşma ---
+        # --- iOS MASKESİ (iPhone Taklidi) ---
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': filename,
             'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '128'}],
             'noplaylist': True,
             
-            # 1. Önbelleği KAPAT (Eski hataları hatırlamasın)
+            # 1. Cache Yok (Hafızasız Mod)
             'cachedir': False, 
             
-            # 2. Android TV Taklidi Yap (En az güvenlik duvarı bundadır)
-            'extractor_args': {'youtube': {'player_client': ['android_tv']}},
+            # 2. iOS İstemcisi (iPhone gibi görünür)
+            'extractor_args': {'youtube': {'player_client': ['ios']}},
             
-            # 3. Sertifika Hatalarını Yoksay
+            # 3. Ekstra Ayarlar
             'nocheckcertificate': True,
             'quiet': True,
             'no_warnings': True,
+            # Mobil User Agent
+            'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -84,33 +88,31 @@ def analiz_et():
             
         file_path = f"{filename}.mp3"
 
-        # --- SES ANALİZİ (Librosa) ---
-        # Hız için sadece ilk 60 saniyeyi analiz ediyoruz
+        # --- SES ANALİZİ ---
         y, sr = librosa.load(file_path, duration=60)
         
-        # 1. BPM (Tempo)
+        # BPM
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
         
-        # 2. TON (Key)
+        # TON
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
         key_idx = np.argmax(np.sum(chroma, axis=1))
         notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
         detected_key = notes[key_idx]
 
-        # 3. AKORLAR (Saniye Saniye)
+        # AKORLAR
         akorlar = []
         hop_length = 512
         chroma_cens = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=hop_length)
         duration = librosa.get_duration(y=y, sr=sr)
         
-        # Her 2 saniyede bir örnek al
         for t in range(0, int(duration), 2): 
             frame_idx = librosa.time_to_frames(t, sr=sr, hop_length=hop_length)
             if frame_idx < chroma_cens.shape[1]:
                 chord = get_chord_from_chroma(chroma_cens, frame_idx)
                 akorlar.append({"zaman": f"{t//60}:{t%60:02d}", "akor": chord})
 
-        # Temizlik (Dosyayı sil)
+        # Temizlik
         if os.path.exists(file_path):
             os.remove(file_path)
 
@@ -122,7 +124,6 @@ def analiz_et():
         })
 
     except Exception as e:
-        # Hata olsa bile dosyayı silmeye çalış
         if 'file_path' in locals() and os.path.exists(file_path):
             os.remove(file_path)
         return jsonify({"success": False, "error": str(e)}), 500
