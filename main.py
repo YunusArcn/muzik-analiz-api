@@ -8,7 +8,7 @@ import ssl
 import random
 import time
 
-# SSL Sertifika hatasını önlemek için
+# SSL Hatasını Önleme (Sunucular için kritik)
 try:
     _create_unverified_https_context = ssl._create_unverified_context
 except AttributeError:
@@ -19,9 +19,9 @@ else:
 app = Flask(__name__)
 CORS(app)
 
-# --- MÜZİK TEORİSİ (Akor Bulucu) ---
+# --- MÜZİK TEORİSİ FONKSİYONLARI ---
 def get_chord_from_chroma(chroma, time_idx):
-    # Basit majör/minör şablonları
+    # Basit Akor Şablonları
     templates = {
         'C': [1,0,0,0,1,0,0,1,0,0,0,0], 'Cm': [1,0,0,1,0,0,0,1,0,0,0,0],
         'C#': [0,1,0,0,0,1,0,0,1,0,0,0], 'C#m': [0,1,0,0,1,0,0,0,1,0,0,0],
@@ -54,22 +54,29 @@ def analiz_et():
     youtube_url = data.get('url')
     
     if not youtube_url:
-        return jsonify({"success": False, "error": "URL yok"}), 400
+        return jsonify({"success": False, "error": "Lütfen bir YouTube linki gönderin."}), 400
 
+    # Benzersiz dosya adı oluştur
     filename = f"temp_{int(time.time())}_{random.randint(1000,9999)}"
     
     try:
-        # --- KRİTİK GÜNCELLEME: ANDROID MASKESİ ---
+        # --- KRİTİK AYARLAR: YouTube Bot Korumasını Aşma ---
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': filename,
             'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '128'}],
             'noplaylist': True,
-            # YouTube'a "Ben Android telefonum" diyoruz:
-            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
-            # User Agent hilesi:
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            
+            # 1. Önbelleği KAPAT (Eski hataları hatırlamasın)
+            'cachedir': False, 
+            
+            # 2. Android TV Taklidi Yap (En az güvenlik duvarı bundadır)
+            'extractor_args': {'youtube': {'player_client': ['android_tv']}},
+            
+            # 3. Sertifika Hatalarını Yoksay
             'nocheckcertificate': True,
+            'quiet': True,
+            'no_warnings': True,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -77,32 +84,33 @@ def analiz_et():
             
         file_path = f"{filename}.mp3"
 
-        # 2. Analiz (Sadece ilk 60 saniye - Hız için)
+        # --- SES ANALİZİ (Librosa) ---
+        # Hız için sadece ilk 60 saniyeyi analiz ediyoruz
         y, sr = librosa.load(file_path, duration=60)
         
-        # BPM
+        # 1. BPM (Tempo)
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
         
-        # KEY (Ton)
+        # 2. TON (Key)
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
         key_idx = np.argmax(np.sum(chroma, axis=1))
         notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
         detected_key = notes[key_idx]
 
-        # AKORLAR
+        # 3. AKORLAR (Saniye Saniye)
         akorlar = []
         hop_length = 512
         chroma_cens = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=hop_length)
         duration = librosa.get_duration(y=y, sr=sr)
         
-        # 2 saniyede bir akor değişimi tahmini
+        # Her 2 saniyede bir örnek al
         for t in range(0, int(duration), 2): 
             frame_idx = librosa.time_to_frames(t, sr=sr, hop_length=hop_length)
             if frame_idx < chroma_cens.shape[1]:
                 chord = get_chord_from_chroma(chroma_cens, frame_idx)
                 akorlar.append({"zaman": f"{t//60}:{t%60:02d}", "akor": chord})
 
-        # Temizlik
+        # Temizlik (Dosyayı sil)
         if os.path.exists(file_path):
             os.remove(file_path)
 
@@ -114,10 +122,9 @@ def analiz_et():
         })
 
     except Exception as e:
-        # Hata durumunda bile dosyayı temizle
+        # Hata olsa bile dosyayı silmeye çalış
         if 'file_path' in locals() and os.path.exists(file_path):
             os.remove(file_path)
-        # Hata mesajını detaylı göster
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
