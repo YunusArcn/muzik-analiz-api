@@ -8,7 +8,7 @@ import time
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-# Maksimum dosya boyutu (Örn: 16 MB)
+# Maksimum dosya boyutu: 16 MB
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 CORS(app)
 
@@ -51,13 +51,13 @@ def analiz_et():
     if file.filename == '':
         return jsonify({"success": False, "error": "Dosya seçilmedi!"}), 400
 
-    # Dosyayı Geçici Kaydet
+    # 2. Dosyayı Geçici Kaydet
     filename = secure_filename(file.filename)
     unique_name = f"upload_{int(time.time())}_{random.randint(1000,9999)}_{filename}"
     file.save(unique_name)
     
     try:
-        # 2. Analiz (Librosa) - İlk 60 saniye
+        # 3. Analiz (Librosa) - İlk 60 saniye
         y, sr = librosa.load(unique_name, duration=60)
         
         # BPM
