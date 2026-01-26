@@ -5,3 +5,4 @@ librosa
 numpy
 scipy
 gunicorn
+ffmpeg-python
