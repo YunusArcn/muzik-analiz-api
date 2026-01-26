@@ -1,29 +1,18 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import yt_dlp
 import librosa
 import numpy as np
 import os
-import ssl
 import random
 import time
-import sys
-
-# SSL Hatasını Önleme
-try:
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
-else:
-    ssl._create_default_https_context = _create_unverified_https_context
-
-# Sürüm kontrolü (Loglarda görmek için)
-print(f"yt-dlp sürümü: {yt_dlp.version.__version__}")
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
+# Maksimum dosya boyutu (Örn: 16 MB)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 CORS(app)
 
-# --- MÜZİK TEORİSİ FONKSİYONLARI ---
+# --- MÜZİK TEORİSİ (Akor Bulucu) ---
 def get_chord_from_chroma(chroma, time_idx):
     templates = {
         'C': [1,0,0,0,1,0,0,1,0,0,0,0], 'Cm': [1,0,0,1,0,0,0,1,0,0,0,0],
@@ -53,48 +42,28 @@ def get_chord_from_chroma(chroma, time_idx):
 
 @app.route('/analiz-et', methods=['POST'])
 def analiz_et():
-    data = request.json
-    youtube_url = data.get('url')
+    # 1. Dosya Kontrolü
+    if 'file' not in request.files:
+        return jsonify({"success": False, "error": "Dosya yüklenmedi!"}), 400
     
-    if not youtube_url:
-        return jsonify({"success": False, "error": "Lütfen bir YouTube linki gönderin."}), 400
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({"success": False, "error": "Dosya seçilmedi!"}), 400
 
-    filename = f"temp_{int(time.time())}_{random.randint(1000,9999)}"
+    # Dosyayı Geçici Kaydet
+    filename = secure_filename(file.filename)
+    unique_name = f"upload_{int(time.time())}_{random.randint(1000,9999)}_{filename}"
+    file.save(unique_name)
     
     try:
-        # --- iOS MASKESİ (iPhone Taklidi) ---
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': filename,
-            'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '128'}],
-            'noplaylist': True,
-            
-            # 1. Cache Yok (Hafızasız Mod)
-            'cachedir': False, 
-            
-            # 2. iOS İstemcisi (iPhone gibi görünür)
-            'extractor_args': {'youtube': {'player_client': ['ios']}},
-            
-            # 3. Ekstra Ayarlar
-            'nocheckcertificate': True,
-            'quiet': True,
-            'no_warnings': True,
-            # Mobil User Agent
-            'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([youtube_url])
-            
-        file_path = f"{filename}.mp3"
-
-        # --- SES ANALİZİ ---
-        y, sr = librosa.load(file_path, duration=60)
+        # 2. Analiz (Librosa) - İlk 60 saniye
+        y, sr = librosa.load(unique_name, duration=60)
         
         # BPM
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
         
-        # TON
+        # TON (Key)
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
         key_idx = np.argmax(np.sum(chroma, axis=1))
         notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -113,8 +82,8 @@ def analiz_et():
                 akorlar.append({"zaman": f"{t//60}:{t%60:02d}", "akor": chord})
 
         # Temizlik
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        if os.path.exists(unique_name):
+            os.remove(unique_name)
 
         return jsonify({
             "success": True,
@@ -124,8 +93,8 @@ def analiz_et():
         })
 
     except Exception as e:
-        if 'file_path' in locals() and os.path.exists(file_path):
-            os.remove(file_path)
+        if os.path.exists(unique_name):
+            os.remove(unique_name)
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
