@@ -12,7 +12,7 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 CORS(app)
 
-# --- 1. UPTIME ROBOT İÇİN EKLENEN KISIM (BURASI YENİ) ---
+# --- 1. UPTIME ROBOT İÇİN ANASAYFA ---
 @app.route('/', methods=['GET'])
 def home():
     return "Müzik Analiz API Çalışıyor! Sunucu Aktif. 🚀", 200
@@ -62,8 +62,10 @@ def analiz_et():
     file.save(unique_name)
     
     try:
-        # 3. Analiz (Librosa) - Render için optimize edildi (30 sn)
-        y, sr = librosa.load(unique_name, duration=30)
+        # --- KRİTİK DÜZELTME ---
+        # sr=None: İşlemciyi yoran resampling işlemini kapatır.
+        # duration=25: RAM taşmasını engeller.
+        y, sr = librosa.load(unique_name, duration=25, sr=None)
         
         # BPM
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
@@ -100,6 +102,8 @@ def analiz_et():
     except Exception as e:
         if os.path.exists(unique_name):
             os.remove(unique_name)
+        # Hata detayını loglara bas ki görelim
+        print(f"HATA DETAYI: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
