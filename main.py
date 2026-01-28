@@ -12,6 +12,11 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 CORS(app)
 
+# --- 1. UPTIME ROBOT İÇİN EKLENEN KISIM (BURASI YENİ) ---
+@app.route('/', methods=['GET'])
+def home():
+    return "Müzik Analiz API Çalışıyor! Sunucu Aktif. 🚀", 200
+
 # --- MÜZİK TEORİSİ (Akor Bulucu) ---
 def get_chord_from_chroma(chroma, time_idx):
     templates = {
@@ -57,8 +62,8 @@ def analiz_et():
     file.save(unique_name)
     
     try:
-        # 3. Analiz (Librosa) - İlk 60 saniye
-        y, sr = librosa.load(unique_name, duration=60)
+        # 3. Analiz (Librosa) - Render için optimize edildi (30 sn)
+        y, sr = librosa.load(unique_name, duration=30)
         
         # BPM
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
