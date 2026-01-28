@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import librosa
 import numpy as np
+import soundfile as sf  # <--- YENİ KAHRAMANIMIZ
 import os
 import random
 import time
@@ -12,7 +13,7 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 CORS(app)
 
-# --- 1. UPTIME ROBOT İÇİN ANASAYFA ---
+# --- UPTIME ROBOT İÇİN ANASAYFA ---
 @app.route('/', methods=['GET'])
 def home():
     return "Müzik Analiz API Çalışıyor! Sunucu Aktif. 🚀", 200
@@ -47,25 +48,34 @@ def get_chord_from_chroma(chroma, time_idx):
 
 @app.route('/analiz-et', methods=['POST'])
 def analiz_et():
-    # 1. Dosya Kontrolü
     if 'file' not in request.files:
         return jsonify({"success": False, "error": "Dosya yüklenmedi!"}), 400
     
     file = request.files['file']
-    
     if file.filename == '':
         return jsonify({"success": False, "error": "Dosya seçilmedi!"}), 400
 
-    # 2. Dosyayı Geçici Kaydet
     filename = secure_filename(file.filename)
     unique_name = f"upload_{int(time.time())}_{random.randint(1000,9999)}_{filename}"
     file.save(unique_name)
     
     try:
-        # --- KRİTİK DÜZELTME ---
-        # sr=None: İşlemciyi yoran resampling işlemini kapatır.
-        # duration=25: RAM taşmasını engeller.
-        y, sr = librosa.load(unique_name, duration=25, sr=None)
+        # --- İŞTE SİHİRLİ DEĞİŞİKLİK BURADA ---
+        # Librosa.load yerine Soundfile kullanıyoruz (Çok daha hafif)
+        
+        # 1. Dosyayı oku
+        y, sr = sf.read(unique_name)
+        
+        # 2. Eğer Stereo ise (Çift kanal), Mono'ya çevir (Numpy ile manuel yapıyoruz, RAM yemez)
+        if y.ndim > 1:
+            y = np.mean(y, axis=1)
+            
+        # 3. Sadece ilk 30 saniyeyi al (Kesme işlemi)
+        max_frames = 30 * sr
+        if len(y) > max_frames:
+            y = y[:max_frames]
+
+        # --- BURADAN SONRASI AYNI ---
         
         # BPM
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
@@ -80,7 +90,7 @@ def analiz_et():
         akorlar = []
         hop_length = 512
         chroma_cens = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=hop_length)
-        duration = librosa.get_duration(y=y, sr=sr)
+        duration = len(y) / sr # Süreyi manuel hesapla
         
         for t in range(0, int(duration), 2): 
             frame_idx = librosa.time_to_frames(t, sr=sr, hop_length=hop_length)
@@ -88,7 +98,6 @@ def analiz_et():
                 chord = get_chord_from_chroma(chroma_cens, frame_idx)
                 akorlar.append({"zaman": f"{t//60}:{t%60:02d}", "akor": chord})
 
-        # Temizlik
         if os.path.exists(unique_name):
             os.remove(unique_name)
 
@@ -102,7 +111,6 @@ def analiz_et():
     except Exception as e:
         if os.path.exists(unique_name):
             os.remove(unique_name)
-        # Hata detayını loglara bas ki görelim
         print(f"HATA DETAYI: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
