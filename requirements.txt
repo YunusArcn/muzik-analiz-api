@@ -1,7 +1,7 @@
-flask
+Flask
 flask-cors
-librosa
-numpy
-scipy
 gunicorn
+numpy
+librosa
+soundfile
 werkzeug
