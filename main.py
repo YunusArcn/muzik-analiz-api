@@ -2,21 +2,20 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import librosa
 import numpy as np
-import soundfile as sf  # <--- YENİ KAHRAMANIMIZ
+import soundfile as sf
 import os
 import random
 import time
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-# Maksimum dosya boyutu: 16 MB
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
+# Maksimum dosya boyutu: 10 MB (Limiti de düşürdük)
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 
 CORS(app)
 
-# --- UPTIME ROBOT İÇİN ANASAYFA ---
 @app.route('/', methods=['GET'])
 def home():
-    return "Müzik Analiz API Çalışıyor! Sunucu Aktif. 🚀", 200
+    return "Müzik Analiz API (Lite Mode) Çalışıyor! 🚀", 200
 
 # --- MÜZİK TEORİSİ (Akor Bulucu) ---
 def get_chord_from_chroma(chroma, time_idx):
@@ -60,42 +59,44 @@ def analiz_et():
     file.save(unique_name)
     
     try:
-        # --- İŞTE SİHİRLİ DEĞİŞİKLİK BURADA ---
-        # Librosa.load yerine Soundfile kullanıyoruz (Çok daha hafif)
-        
-        # 1. Dosyayı oku
+        # --- LITE MODE OPTİMİZASYONU ---
+        # 1. Soundfile ile açıyoruz (RAM dostu)
         y, sr = sf.read(unique_name)
         
-        # 2. Eğer Stereo ise (Çift kanal), Mono'ya çevir (Numpy ile manuel yapıyoruz, RAM yemez)
+        # 2. Mono yapıyoruz
         if y.ndim > 1:
             y = np.mean(y, axis=1)
             
-        # 3. Sadece ilk 30 saniyeyi al (Kesme işlemi)
-        max_frames = 30 * sr
+        # 3. SÜREYİ KISALTTIK: Sadece ilk 10 saniye! (İşlemciyi kurtarmak için)
+        max_frames = 10 * sr
         if len(y) > max_frames:
             y = y[:max_frames]
 
-        # --- BURADAN SONRASI AYNI ---
-        
-        # BPM
+        # 4. AĞIR İŞLEMİ DEĞİŞTİRDİK:
+        # chroma_cqt yerine chroma_stft kullanıyoruz. CQT çok ağırdır, STFT çok hafiftir.
+        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+
+        # BPM (Hala gerekli)
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
         
         # TON (Key)
-        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
         key_idx = np.argmax(np.sum(chroma, axis=1))
         notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
         detected_key = notes[key_idx]
 
         # AKORLAR
         akorlar = []
-        hop_length = 512
-        chroma_cens = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=hop_length)
-        duration = len(y) / sr # Süreyi manuel hesapla
+        # Hop length'i artırdık (Daha az veri işlesin diye)
+        hop_length = 1024 
+        
+        # Cens yerine yine hafif olan stft kullanıyoruz
+        chroma_for_chords = librosa.feature.chroma_stft(y=y, sr=sr, hop_length=hop_length)
+        duration = len(y) / sr
         
         for t in range(0, int(duration), 2): 
             frame_idx = librosa.time_to_frames(t, sr=sr, hop_length=hop_length)
-            if frame_idx < chroma_cens.shape[1]:
-                chord = get_chord_from_chroma(chroma_cens, frame_idx)
+            if frame_idx < chroma_for_chords.shape[1]:
+                chord = get_chord_from_chroma(chroma_for_chords, frame_idx)
                 akorlar.append({"zaman": f"{t//60}:{t%60:02d}", "akor": chord})
 
         if os.path.exists(unique_name):
@@ -111,7 +112,7 @@ def analiz_et():
     except Exception as e:
         if os.path.exists(unique_name):
             os.remove(unique_name)
-        print(f"HATA DETAYI: {str(e)}")
+        print(f"HATA: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
